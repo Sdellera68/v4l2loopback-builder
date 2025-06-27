@@ -12,16 +12,13 @@ jobs:
     runs-on: ubuntu-latest
 
     steps:
-      # 1. Checkout
       - uses: actions/checkout@v3
 
-      # 2. Installer les dépendances système
       - name: Install build dependencies
         run: |
           sudo apt-get update
-          sudo apt-get install -y clang bc libncurses-dev flex bison
+          sudo apt-get install -y clang bc flex bison libncurses-dev libssl-dev unzip zip
 
-      # 3. Télécharger l’archive kernel depuis la Release
       - name: Download kernel ZIP from Release v1.0
         uses: robinraju/release-downloader@v1
         with:
@@ -30,7 +27,6 @@ jobs:
           fileName: SM-N970F_EUR_12_Opensource.zip
           token: ${{ secrets.GITHUB_TOKEN }}
 
-      # 4. Extraction
       - name: Extract kernel sources
         run: |
           unzip -q SM-N970F_EUR_12_Opensource.zip
@@ -38,29 +34,30 @@ jobs:
             [ -f "$TAR" ] && tar xzf "$TAR"
           done
 
-      # 5. Injecter config
+      - name: Find kernel root directory
+        id: findroot
+        run: |
+          # Cherche le premier répertoire contenant un Makefile avec VERSION
+          ROOT=$(find . -maxdepth 2 -type f -name Makefile -exec grep -l "VERSION =" {} \; | head -n1 | xargs dirname)
+          echo "kernel_root=${ROOT#./}" >> $GITHUB_OUTPUT
+
       - name: Prepare kernel config
         run: gunzip -c config.gz > .config
 
-      # 6. Préparer l’arbre de build
       - name: Prepare build directory
         run: |
-          mkdir build
-          cp .config build/.config
+          mkdir -p "${{ steps.findroot.outputs.kernel_root }}/build"
+          cp .config "${{ steps.findroot.outputs.kernel_root }}/build/.config"
 
-      # 7. Cloner v4l2loopback
       - name: Clone v4l2loopback
         run: git clone --depth 1 https://github.com/umlaeute/v4l2loopback.git
 
-      # 8. Compiler avec clang du système
       - name: Build v4l2loopback
         run: |
-          make ARCH=arm64 O=build olddefconfig \
-            CC=clang HOSTCC=clang LLVM=1
-          make -C build M=./v4l2loopback \
-            ARCH=arm64 CC=clang HOSTCC=clang LLVM=1 modules
+          cd "${{ steps.findroot.outputs.kernel_root }}"
+          make ARCH=arm64 O=build olddefconfig CC=clang HOSTCC=clang LLVM=1
+          make -C build M=../v4l2loopback ARCH=arm64 CC=clang HOSTCC=clang LLVM=1 modules
 
-      # 9. Publier le .ko
       - name: Upload artifact
         uses: actions/upload-artifact@v4
         with:
