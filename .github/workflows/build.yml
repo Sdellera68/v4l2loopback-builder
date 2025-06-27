@@ -14,7 +14,7 @@ jobs:
     steps:
       - uses: actions/checkout@v3
 
-      - name: Install build deps
+      - name: Install build dependencies
         run: |
           sudo apt-get update
           sudo apt-get install -y clang bc flex bison libncurses-dev libssl-dev
@@ -35,21 +35,37 @@ jobs:
           fileName: Platform.tar.gz
           token: ${{ secrets.GITHUB_TOKEN }}
 
-      - name: Extract kernel sources
+      - name: Compute cache key
+        id: key
         run: |
-          tar xzf Kernel.tar.gz
-          tar xzf Platform.tar.gz
+          echo "kernel_hash=$(sha256sum Kernel.tar.gz | cut -d' ' -f1)" >> $GITHUB_OUTPUT
 
-      - name: Find kernel root
+      - name: Restore cache of kernel_src
+        id: cache
+        uses: actions/cache@v3
+        with:
+          path: kernel_src
+          key: kernel-src-${{ steps.key.outputs.kernel_hash }}
+
+      - name: Extract kernel sources (if cache miss)
+        if: steps.cache.outputs.cache-hit != 'true'
+        run: |
+          mkdir kernel_src
+          tar xzf Kernel.tar.gz -C kernel_src
+          tar xzf Platform.tar.gz -C kernel_src
+
+      - name: Find kernel root directory
         id: findroot
         run: |
-          ROOT=$(find . -type f -name Makefile -exec grep -l "VERSION =" {} \; | head -n1 | xargs dirname)
-          echo "kernel_root=${ROOT#./}" >> $GITHUB_OUTPUT
+          ROOT=$(find kernel_src -type f -name Makefile -exec grep -l "VERSION =" {} \; \
+                 | head -n1 | xargs dirname)
+          [ -n "$ROOT" ] || { echo "No kernel Makefile found!"; exit 1; }
+          echo "kernel_root=$ROOT" >> $GITHUB_OUTPUT
 
-      - name: Prepare config
+      - name: Prepare kernel config
         run: gunzip -c config.gz > .config
 
-      - name: Prepare build dir
+      - name: Prepare build directory
         run: |
           mkdir -p "${{ steps.findroot.outputs.kernel_root }}/build"
           cp .config "${{ steps.findroot.outputs.kernel_root }}/build/.config"
@@ -57,7 +73,7 @@ jobs:
       - name: Clone v4l2loopback
         run: git clone --depth 1 https://github.com/umlaeute/v4l2loopback.git
 
-      - name: Build
+      - name: Build v4l2loopback
         run: |
           cd "${{ steps.findroot.outputs.kernel_root }}"
           make ARCH=arm64 O=build olddefconfig CC=clang HOSTCC=clang LLVM=1
