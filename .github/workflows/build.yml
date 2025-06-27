@@ -12,13 +12,16 @@ jobs:
     runs-on: ubuntu-latest
 
     steps:
+      # 1) Récupérer le code
       - uses: actions/checkout@v3
 
-      - name: Install build dependencies
+      # 2) Installer les dépendances
+      - name: Install build deps
         run: |
           sudo apt-get update
-          sudo apt-get install -y clang bc flex bison libncurses-dev libssl-dev
+          sudo apt-get install -y clang bc flex bison libncurses-dev libssl-dev unzip zip
 
+      # 3) Télécharger les deux tarballs de la Release
       - name: Download Kernel.tar.gz
         uses: robinraju/release-downloader@v1
         with:
@@ -35,50 +38,49 @@ jobs:
           fileName: Platform.tar.gz
           token: ${{ secrets.GITHUB_TOKEN }}
 
-      - name: Compute cache key
-        id: key
+      # 4) Extraire les sources dans kernel_src/
+      - name: Extract kernel sources
         run: |
-          echo "kernel_hash=$(sha256sum Kernel.tar.gz | cut -d' ' -f1)" >> $GITHUB_OUTPUT
+          rm -rf kernel_src
+          mkdir -p kernel_src
+          tar -xzf Kernel.tar.gz -C kernel_src
+          tar -xzf Platform.tar.gz -C kernel_src
 
-      - name: Restore cache of kernel_src
-        id: cache
-        uses: actions/cache@v3
-        with:
-          path: kernel_src
-          key: kernel-src-${{ steps.key.outputs.kernel_hash }}
-
-      - name: Extract kernel sources (if cache miss)
-        if: steps.cache.outputs.cache-hit != 'true'
-        run: |
-          mkdir kernel_src
-          tar xzf Kernel.tar.gz -C kernel_src
-          tar xzf Platform.tar.gz -C kernel_src
-
-      - name: Find kernel root directory
+      # 5) Détecter la racine du noyau
+      - name: Find kernel root
         id: findroot
         run: |
-          ROOT=$(find kernel_src -type f -name Makefile -exec grep -l "VERSION =" {} \; \
-                 | head -n1 | xargs dirname)
-          [ -n "$ROOT" ] || { echo "No kernel Makefile found!"; exit 1; }
+          ROOT=$(find kernel_src -type f -name Makefile -exec grep -l "VERSION =" {} \; | head -n1 | xargs dirname)
+          if [ -z "$ROOT" ]; then
+            echo "❌ Cannot find kernel Makefile!"
+            exit 1
+          fi
           echo "kernel_root=$ROOT" >> $GITHUB_OUTPUT
 
+      # 6) Injecter config.gz
       - name: Prepare kernel config
-        run: gunzip -c config.gz > .config
+        run: |
+          gunzip -c config.gz > .config
 
+      # 7) Préparer l’arbre de build
       - name: Prepare build directory
         run: |
           mkdir -p "${{ steps.findroot.outputs.kernel_root }}/build"
           cp .config "${{ steps.findroot.outputs.kernel_root }}/build/.config"
 
+      # 8) Cloner v4l2loopback
       - name: Clone v4l2loopback
-        run: git clone --depth 1 https://github.com/umlaeute/v4l2loopback.git
+        run: |
+          git clone --depth 1 https://github.com/umlaeute/v4l2loopback.git
 
+      # 9) Compiler le module
       - name: Build v4l2loopback
         run: |
           cd "${{ steps.findroot.outputs.kernel_root }}"
           make ARCH=arm64 O=build olddefconfig CC=clang HOSTCC=clang LLVM=1
           make -C build M=../../v4l2loopback ARCH=arm64 CC=clang HOSTCC=clang LLVM=1 modules
 
+      # 10) Publier l’artifact
       - name: Upload artifact
         uses: actions/upload-artifact@v4
         with:
