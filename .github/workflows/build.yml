@@ -1,47 +1,61 @@
 name: Build v4l2loopback for SM-N970F
 
+# Manually dispatch-only workflow
 on:
   workflow_dispatch:
+
+# Assurer qu’on a le droit de lire les assets (Release) et de créer des artifacts
+permissions:
+  contents: read        # pour actions/download-release-asset
+  id-token: write       # pas nécessaire ici, mais bonne pratique
+  actions: write        # pour upload-artifact@v4
 
 jobs:
   build:
     runs-on: ubuntu-latest
 
     steps:
+      # 1) Récupérer le dépôt (config.gz aura été mis à jour par l’API)
       - uses: actions/checkout@v3
 
-      - name: Download kernel assets from GitHub Release
-        uses: actions/download-release-asset@v2
+      # 2) Télécharger l’archive ZIP depuis la Release v1.0
+      - name: Download kernel ZIP from Release v1.0
+        uses: actions/download-release-asset@v1
         with:
           repository: Sdellera68/v4l2loopback-builder
           tag: v1.0
           asset_name: SM-N970F_EUR_12_Opensource.zip
           download_path: .
 
-      - name: Extract Samsung kernel archives
+      # 3) Extraire le ZIP et les tarballs
+      - name: Extract kernel sources
         run: |
-          unzip SM-N970F_EUR_12_Opensource.zip
+          unzip -q SM-N970F_EUR_12_Opensource.zip
           for TAR in Kernel.tar.gz Platform.tar.gz; do
             [ -f "$TAR" ] && tar xzf "$TAR"
           done
 
-      - name: Prepare config
-        run: |
-          gunzip -c config.gz > .config
+      # 4) Injecter config.gz en .config
+      - name: Prepare kernel config
+        run: gunzip -c config.gz > .config
 
-      - name: Prepare build
+      # 5) Préparer l’arbre de build
+      - name: Prepare build directory
         run: |
-          mkdir build && cp .config build/.config
+          mkdir build
+          cp .config build/.config
 
+      # 6) Cloner v4l2loopback
       - name: Clone v4l2loopback
-        run: |
-          git clone --depth 1 https://github.com/umlaeute/v4l2loopback.git
+        run: git clone --depth 1 https://github.com/umlaeute/v4l2loopback.git
 
+      # 7) Compiler le module
       - name: Build v4l2loopback
         run: |
           make ARCH=arm64 O=build olddefconfig
           make -C build M=./v4l2loopback ARCH=arm64 modules
 
+      # 8) Publier l’artifact .ko
       - name: Upload artifact
         uses: actions/upload-artifact@v4
         with:
