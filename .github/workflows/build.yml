@@ -4,8 +4,8 @@ on:
   workflow_dispatch:
 
 permissions:
-  contents: read
-  actions: write
+  contents: read   # pour lire les assets de la Release
+  actions: write   # pour upload-artifact@v4
 
 jobs:
   build:
