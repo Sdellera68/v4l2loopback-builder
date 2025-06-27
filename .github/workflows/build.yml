@@ -37,8 +37,11 @@ jobs:
       - name: Find kernel root directory
         id: findroot
         run: |
-          # Cherche le premier répertoire contenant un Makefile avec VERSION
-          ROOT=$(find . -maxdepth 2 -type f -name Makefile -exec grep -l "VERSION =" {} \; | head -n1 | xargs dirname)
+          ROOT=$(find . -type f -name Makefile -exec grep -l "VERSION =" {} \; | head -n1 | xargs dirname)
+          if [ -z "$ROOT" ]; then
+            echo "❌ No kernel Makefile found!"
+            exit 1
+          fi
           echo "kernel_root=${ROOT#./}" >> $GITHUB_OUTPUT
 
       - name: Prepare kernel config
@@ -56,7 +59,7 @@ jobs:
         run: |
           cd "${{ steps.findroot.outputs.kernel_root }}"
           make ARCH=arm64 O=build olddefconfig CC=clang HOSTCC=clang LLVM=1
-          make -C build M=../v4l2loopback ARCH=arm64 CC=clang HOSTCC=clang LLVM=1 modules
+          make -C build M=../../v4l2loopback ARCH=arm64 CC=clang HOSTCC=clang LLVM=1 modules
 
       - name: Upload artifact
         uses: actions/upload-artifact@v4
