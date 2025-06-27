@@ -14,40 +14,42 @@ jobs:
     steps:
       - uses: actions/checkout@v3
 
-      - name: Install build dependencies
+      - name: Install build deps
         run: |
           sudo apt-get update
-          sudo apt-get install -y clang bc flex bison libncurses-dev libssl-dev unzip zip
+          sudo apt-get install -y clang bc flex bison libncurses-dev libssl-dev
 
-      - name: Download kernel ZIP from Release v1.0
+      - name: Download Kernel.tar.gz
         uses: robinraju/release-downloader@v1
         with:
           repository: Sdellera68/v4l2loopback-builder
           tag: v1.0
-          fileName: SM-N970F_EUR_12_Opensource.zip
+          fileName: Kernel.tar.gz
+          token: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Download Platform.tar.gz
+        uses: robinraju/release-downloader@v1
+        with:
+          repository: Sdellera68/v4l2loopback-builder
+          tag: v1.0
+          fileName: Platform.tar.gz
           token: ${{ secrets.GITHUB_TOKEN }}
 
       - name: Extract kernel sources
         run: |
-          unzip -q SM-N970F_EUR_12_Opensource.zip
-          for TAR in Kernel.tar.gz Platform.tar.gz; do
-            [ -f "$TAR" ] && tar xzf "$TAR"
-          done
+          tar xzf Kernel.tar.gz
+          tar xzf Platform.tar.gz
 
-      - name: Find kernel root directory
+      - name: Find kernel root
         id: findroot
         run: |
           ROOT=$(find . -type f -name Makefile -exec grep -l "VERSION =" {} \; | head -n1 | xargs dirname)
-          if [ -z "$ROOT" ]; then
-            echo "❌ No kernel Makefile found!"
-            exit 1
-          fi
           echo "kernel_root=${ROOT#./}" >> $GITHUB_OUTPUT
 
-      - name: Prepare kernel config
+      - name: Prepare config
         run: gunzip -c config.gz > .config
 
-      - name: Prepare build directory
+      - name: Prepare build dir
         run: |
           mkdir -p "${{ steps.findroot.outputs.kernel_root }}/build"
           cp .config "${{ steps.findroot.outputs.kernel_root }}/build/.config"
@@ -55,7 +57,7 @@ jobs:
       - name: Clone v4l2loopback
         run: git clone --depth 1 https://github.com/umlaeute/v4l2loopback.git
 
-      - name: Build v4l2loopback
+      - name: Build
         run: |
           cd "${{ steps.findroot.outputs.kernel_root }}"
           make ARCH=arm64 O=build olddefconfig CC=clang HOSTCC=clang LLVM=1
