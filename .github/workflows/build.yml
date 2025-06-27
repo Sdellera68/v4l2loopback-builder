@@ -12,16 +12,13 @@ jobs:
     runs-on: ubuntu-latest
 
     steps:
-      # 1) Checkout
       - uses: actions/checkout@v3
 
-      # 2) Installer les dépendances
-      - name: Install build deps
+      - name: Install build dependencies
         run: |
           sudo apt-get update
           sudo apt-get install -y clang bc flex bison libncurses-dev libssl-dev unzip zip
 
-      # 3) Télécharger Kernel.tar.gz & Platform.tar.gz
       - name: Download Kernel.tar.gz
         uses: robinraju/release-downloader@v1
         with:
@@ -38,7 +35,6 @@ jobs:
           fileName: Platform.tar.gz
           token: ${{ secrets.GITHUB_TOKEN }}
 
-      # 4) Extraction dans kernel_src/
       - name: Extract kernel sources
         run: |
           rm -rf kernel_src
@@ -46,8 +42,7 @@ jobs:
           tar -xzf Kernel.tar.gz -C kernel_src
           tar -xzf Platform.tar.gz -C kernel_src
 
-      # 5) Détecter le vrai répertoire racine du noyau
-      - name: Determine kernel root
+      - name: Determine kernel root directory
         id: findroot
         run: |
           for d in kernel_src/*; do
@@ -56,32 +51,26 @@ jobs:
               exit 0
             fi
           done
-          echo "::error::Could not find kernel root; defaulting to kernel_src"
-          echo "kernel_root=kernel_src" >> $GITHUB_OUTPUT
+          echo "::error::Cannot find kernel root" 
+          exit 1
 
-      # 6) Injecter config.gz
-      - name: Prepare kernel config
-        run: gunzip -c config.gz > .config
-
-      # 7) Préparer l’arbre de build
-      - name: Prepare build directory
+      - name: Prepare kernel build tree
         run: |
-          mkdir -p "${{ steps.findroot.outputs.kernel_root }}/build"
-          cp .config "${{ steps.findroot.outputs.kernel_root }}/build/.config"
+          KDIR=${{ steps.findroot.outputs.kernel_root }}
+          cd "$KDIR"
+          make ARCH=arm64 O=build olddefconfig CC=clang HOSTCC=clang LLVM=1
+          make ARCH=arm64 O=build prepare CC=clang HOSTCC=clang LLVM=1
 
-      # 8) Cloner v4l2loopback
       - name: Clone v4l2loopback
         run: git clone --depth 1 https://github.com/umlaeute/v4l2loopback.git
 
-      # 9) Compiler le module
-      - name: Build v4l2loopback
+      - name: Build v4l2loopback module
         run: |
-          cd "${{ steps.findroot.outputs.kernel_root }}"
-          make ARCH=arm64 O=build olddefconfig CC=clang HOSTCC=clang LLVM=1
-          make -C build M=../../v4l2loopback ARCH=arm64 CC=clang HOSTCC=clang LLVM=1 modules
+          KDIR=${{ steps.findroot.outputs.kernel_root }}/build
+          cd v4l2loopback
+          make KDIR="$KDIR" ARCH=arm64 CC=clang HOSTCC=clang modules
 
-      # 10) Publier l’artifact
-      - name: Upload artifact
+      - name: Upload module artifact
         uses: actions/upload-artifact@v4
         with:
           name: v4l2loopback-Exynos-N970F.ko
