@@ -12,7 +12,7 @@ jobs:
     runs-on: ubuntu-latest
 
     steps:
-      # 1) Récupérer le code
+      # 1) Checkout
       - uses: actions/checkout@v3
 
       # 2) Installer les dépendances
@@ -21,7 +21,7 @@ jobs:
           sudo apt-get update
           sudo apt-get install -y clang bc flex bison libncurses-dev libssl-dev unzip zip
 
-      # 3) Télécharger les deux tarballs de la Release
+      # 3) Télécharger Kernel.tar.gz & Platform.tar.gz
       - name: Download Kernel.tar.gz
         uses: robinraju/release-downloader@v1
         with:
@@ -38,29 +38,30 @@ jobs:
           fileName: Platform.tar.gz
           token: ${{ secrets.GITHUB_TOKEN }}
 
-      # 4) Extraire les sources dans kernel_src/
+      # 4) Extraction dans kernel_src/
       - name: Extract kernel sources
         run: |
           rm -rf kernel_src
-          mkdir -p kernel_src
+          mkdir kernel_src
           tar -xzf Kernel.tar.gz -C kernel_src
           tar -xzf Platform.tar.gz -C kernel_src
 
-      # 5) Détecter la racine du noyau
-      - name: Find kernel root
+      # 5) Détecter le vrai répertoire racine du noyau
+      - name: Determine kernel root
         id: findroot
         run: |
-          ROOT=$(find kernel_src -type f -name Makefile -exec grep -l "VERSION =" {} \; | head -n1 | xargs dirname)
-          if [ -z "$ROOT" ]; then
-            echo "❌ Cannot find kernel Makefile!"
-            exit 1
-          fi
-          echo "kernel_root=$ROOT" >> $GITHUB_OUTPUT
+          for d in kernel_src/*; do
+            if [ -d "$d/arch" ] && [ -d "$d/drivers" ] && [ -f "$d/Makefile" ]; then
+              echo "kernel_root=$d" >> $GITHUB_OUTPUT
+              exit 0
+            fi
+          done
+          echo "::error::Could not find kernel root; defaulting to kernel_src"
+          echo "kernel_root=kernel_src" >> $GITHUB_OUTPUT
 
       # 6) Injecter config.gz
       - name: Prepare kernel config
-        run: |
-          gunzip -c config.gz > .config
+        run: gunzip -c config.gz > .config
 
       # 7) Préparer l’arbre de build
       - name: Prepare build directory
@@ -70,8 +71,7 @@ jobs:
 
       # 8) Cloner v4l2loopback
       - name: Clone v4l2loopback
-        run: |
-          git clone --depth 1 https://github.com/umlaeute/v4l2loopback.git
+        run: git clone --depth 1 https://github.com/umlaeute/v4l2loopback.git
 
       # 9) Compiler le module
       - name: Build v4l2loopback
