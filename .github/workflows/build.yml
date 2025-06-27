@@ -12,75 +12,82 @@ jobs:
     runs-on: ubuntu-latest
 
     steps:
-    - uses: actions/checkout@v3
+      - uses: actions/checkout@v3
 
-    - name: Install build deps
-      run: |
-        sudo apt-get update
-        sudo apt-get install -y clang bc flex bison libncurses-dev libssl-dev unzip zip
+      - name: Install build deps
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y clang bc flex bison libncurses-dev libssl-dev unzip zip
 
-    - name: Download Kernel.tar.gz
-      uses: robinraju/release-downloader@v1
-      with:
-        repository: Sdellera68/v4l2loopback-builder
-        tag: v1.0
-        fileName: Kernel.tar.gz
-        token: ${{ secrets.GITHUB_TOKEN }}
+      - name: Download Kernel.tar.gz
+        uses: robinraju/release-downloader@v1
+        with:
+          repository: Sdellera68/v4l2loopback-builder
+          tag: v1.0
+          fileName: Kernel.tar.gz
+          token: ${{ secrets.GITHUB_TOKEN }}
 
-    - name: Download Platform.tar.gz
-      uses: robinraju/release-downloader@v1
-      with:
-        repository: Sdellera68/v4l2loopback-builder
-        tag: v1.0
-        fileName: Platform.tar.gz
-        token: ${{ secrets.GITHUB_TOKEN }}
+      - name: Download Platform.tar.gz
+        uses: robinraju/release-downloader@v1
+        with:
+          repository: Sdellera68/v4l2loopback-builder
+          tag: v1.0
+          fileName: Platform.tar.gz
+          token: ${{ secrets.GITHUB_TOKEN }}
 
-    - name: Extract kernel sources
-      run: |
-        rm -rf kernel_src kernel_minimal
-        mkdir kernel_src
-        tar -xzf Kernel.tar.gz -C kernel_src
-        tar -xzf Platform.tar.gz -C kernel_src
+      - name: Extract kernel sources
+        run: |
+          rm -rf kernel_src
+          mkdir kernel_src
+          tar -xzf Kernel.tar.gz -C kernel_src
+          tar -xzf Platform.tar.gz -C kernel_src
 
-    - name: Find kernel root
-      id: findroot
-      run: |
-        # cherche l’arbre racine qui contient arch/, drivers/, Makefile
-        for d in kernel_src/*; do
-          if [ -d "$d/arch" ] && [ -d "$d/drivers" ] && [ -f "$d/Makefile" ]; then
-            echo "kernel_root=$d" >> $GITHUB_OUTPUT
-            exit 0
+      - name: Determine kernel root directory
+        id: findroot
+        run: |
+          echo "🔍 Listing all Makefile candidates:" >&2
+          find kernel_src -type f -name Makefile >&2
+
+          ROOT=$(find kernel_src -type f -name Makefile \
+            | while read -r MF; do
+                D=$(dirname "$MF")
+                if [ -d "$D/arch" ] && [ -d "$D/drivers" ]; then
+                  echo "$D"
+                  exit 0
+                fi
+              done)
+
+          if [ -z "$ROOT" ]; then
+            echo "::error::Cannot find kernel root. Check Makefile structure above."
+            exit 1
           fi
-        done
-        echo "::error::Kernel root not found" && exit 1
 
-    - name: Prepare build directory
-      run: |
-        KR=${{ steps.findroot.outputs.kernel_root }}
-        cd "$KR"
-        make ARCH=arm64 O=build olddefconfig CC=clang HOSTCC=clang LLVM=1
-        make ARCH=arm64 O=build prepare CC=clang HOSTCC=clang LLVM=1
+          echo "✓ kernel_root=$ROOT" >&2
+          echo "kernel_root=$ROOT" >> $GITHUB_OUTPUT
 
-    - name: Extract minimal build tree
-      run: |
-        KR=${{ steps.findroot.outputs.kernel_root }}
-        mkdir -p kernel_minimal
-        # on copie uniquement le build tree et les en-têtes
-        cp -a "$KR"/build kernel_minimal/
-        # facultatif : enlever les gros outils de scripts qui ne servent pas
-        # rm -rf kernel_minimal/build/tools
+      - name: Prepare kernel build tree
+        run: |
+          KDIR=${{ steps.findroot.outputs.kernel_root }}
+          cd "$KDIR"
+          make ARCH=arm64 O=build olddefconfig CC=clang HOSTCC=clang LLVM=1
+          make ARCH=arm64 O=build prepare CC=clang HOSTCC=clang LLVM=1
 
-    - name: Clone v4l2loopback
-      run: git clone --depth 1 https://github.com/umlaeute/v4l2loopback.git
+      - name: Extract minimal build tree
+        run: |
+          KDIR=${{ steps.findroot.outputs.kernel_root }}
+          rm -rf kernel_minimal
+          cp -a "$KDIR/build" kernel_minimal
 
-    - name: Build v4l2loopback module
-      run: |
-        # on compile contre le minimal tree
-        cd v4l2loopback
-        make KDIR="../kernel_minimal/build" ARCH=arm64 CC=clang HOSTCC=clang modules
+      - name: Clone v4l2loopback
+        run: git clone --depth 1 https://github.com/umlaeute/v4l2loopback.git
 
-    - name: Upload artifact
-      uses: actions/upload-artifact@v4
-      with:
-        name: v4l2loopback-Exynos-N970F.ko
-        path: v4l2loopback/v4l2loopback.ko
+      - name: Build v4l2loopback module
+        run: |
+          cd v4l2loopback
+          make KDIR="../kernel_minimal" ARCH=arm64 CC=clang HOSTCC=clang modules
+
+      - name: Upload module artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: v4l2loopback-Exynos-N970F.ko
+          path: v4l2loopback/v4l2loopback.ko
